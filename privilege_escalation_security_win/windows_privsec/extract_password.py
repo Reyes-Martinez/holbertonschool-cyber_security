@@ -58,6 +58,7 @@ def clean_password(password):
 def is_valid_base64(string):
     """
     Check if a string is valid Base64.
+    More tolerant version that handles various formats.
     
     Args:
         string (str): String to check
@@ -65,23 +66,18 @@ def is_valid_base64(string):
     Returns:
         bool: True if valid Base64, False otherwise
     """
+    if not string:
+        return False
+    
     # Remove whitespace
     string = string.strip()
     
-    # Check if it looks like Base64 (only valid characters)
-    base64_pattern = re.compile(r'^[A-Za-z0-9+/]+=*$')
-    if not base64_pattern.match(string):
-        return False
-    
-    # Check if length is valid
-    if len(string) % 4 != 0:
-        return False
-    
+    # Try to decode without validation first (more tolerant)
     try:
-        # Try to decode
-        decoded = base64.b64decode(string, validate=True)
+        # Attempt decode with padding if needed
+        decoded = base64.b64decode(string + '=' * (-len(string) % 4))
         # Try to decode as UTF-8
-        decoded.decode('utf-8')
+        decoded.decode('utf-8', errors='ignore')
         return True
     except Exception:
         return False
@@ -96,18 +92,31 @@ def decode_password(password):
     Returns:
         tuple: (decoded_password, is_base64)
     """
+    if not password:
+        return password, False
+    
     clean_pwd = password.strip()
     
-    # Try to decode as Base64
-    if is_valid_base64(clean_pwd):
-        try:
-            decoded = base64.b64decode(clean_pwd).decode('utf-8', errors='ignore')
-            return decoded, True
-        except Exception:
-            pass
+    # Debug: Print original password
+    print(f"[DEBUG] Original password: {clean_pwd}")
     
-    # If we get here, it's not valid Base64
-    return password, False
+    # Try to decode as Base64
+    try:
+        # Attempt Base64 decode with padding
+        decoded_bytes = base64.b64decode(clean_pwd + '=' * (-len(clean_pwd) % 4))
+        decoded = decoded_bytes.decode('utf-8', errors='ignore')
+        
+        # Check if decoded is different from original (it's actually Base64)
+        if decoded != clean_pwd and len(decoded) > 0:
+            print(f"[DEBUG] Successfully decoded to: {decoded}")
+            return decoded, True
+        else:
+            print("[DEBUG] Decoded string is same as original, not Base64")
+            return clean_pwd, False
+            
+    except Exception as e:
+        print(f"[DEBUG] Decode failed: {e}")
+        return clean_pwd, False
 
 def generate_flag(password, file_path):
     """
